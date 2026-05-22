@@ -66,8 +66,11 @@
     position: fixed; inset: 0;
     pointer-events: none;
     z-index: 5;
+    align-items: flex-end;            /* 操作群を画面下に */
+    justify-content: space-between;   /* 十字キー=左 / アクション=右 */
+    padding: 0 12px 12px;
   }
-  body.touch-mode .touch-overlay { display: block; }
+  body.touch-mode .touch-overlay { display: flex; }
   body.touch-mode { padding: 0; height: 100vh; }
   body.touch-mode h1, body.touch-mode .info { display: none; }
   body.touch-mode canvas {
@@ -76,19 +79,17 @@
   }
   body.touch-mode .canvas-wrap {
     width: 100vw; height: 100vh;
+    align-items: flex-start;   /* 縦画面では画面を上寄せ、下に操作ボタン領域 */
   }
 
   .dpad-area, .action-area {
-    position: absolute;
-    bottom: 14px;
     pointer-events: auto;
     display: grid;
     gap: 8px;
   }
   .dpad-area {
-    left: 14px;
-    grid-template-columns: 58px 58px 58px;
-    grid-template-rows: 58px 58px 58px;
+    grid-template-columns: repeat(3, clamp(38px, 13vw, 56px));
+    grid-template-rows: repeat(3, clamp(38px, 13vw, 56px));
   }
   .dpad-btn {
     background: rgba(40,40,60,0.55);
@@ -109,9 +110,8 @@
   .dpad-btn.pressed { background: rgba(255,180,80,0.7); }
 
   .action-area {
-    right: 14px;
-    grid-template-columns: 68px 68px;
-    grid-template-rows: 68px 68px;
+    grid-template-columns: repeat(2, clamp(42px, 15vw, 64px));
+    grid-template-rows: repeat(2, clamp(42px, 15vw, 64px));
   }
   .action-btn {
     border-radius: 50%;
@@ -142,9 +142,8 @@
     padding: 20px;
   }
   .rotate-hint .icon { font-size: 80px; margin-bottom: 20px; }
-  @media (orientation: portrait) and (pointer: coarse) {
-    body.touch-mode .rotate-hint { display: flex; }
-  }
+  /* 縦向きでもプレイ可能にするため回転の強制は無効化
+     （回転ロックON / LINEアプリ内ブラウザ等で横向きにできない環境対策） */
 </style>
 </head>
 <body>
