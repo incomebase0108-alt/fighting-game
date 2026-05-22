@@ -1,0 +1,1566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>格闘ゲーム（試作版）</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #0a0a14;
+    color: #fff;
+    font-family: 'Yu Gothic', 'Meiryo', sans-serif;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; padding: 12px 0;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 4px 0 8px;
+    letter-spacing: 0.08em;
+    color: #ffcc66;
+  }
+  .canvas-wrap {
+    position: relative;
+    display: flex; justify-content: center; align-items: center;
+  }
+  canvas {
+    background: #000;
+    display: block;
+    width: min(100vw - 16px, 100vh * 16/9);
+    height: auto;
+    aspect-ratio: 16 / 9;
+    box-shadow: 0 0 40px rgba(255,100,0,0.35);
+    border: 2px solid #333;
+    touch-action: none;
+  }
+  .info {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #ccc;
+    max-width: 960px;
+    background: #1a1a26;
+    padding: 12px 18px;
+    border-radius: 6px;
+    border: 1px solid #333;
+  }
+  .info kbd {
+    background: #333; padding: 2px 7px; border-radius: 3px;
+    color: #fff; font-family: 'Consolas', monospace;
+    font-size: 12px; border: 1px solid #555;
+  }
+  .info strong { color: #ffcc66; }
+  .info .sec { margin-bottom: 6px; }
+
+  /* タッチオーバーレイ（モバイル時のみ表示） */
+  .touch-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  body.touch-mode .touch-overlay { display: block; }
+  body.touch-mode { padding: 0; height: 100vh; }
+  body.touch-mode h1, body.touch-mode .info { display: none; }
+  body.touch-mode canvas {
+    width: min(100vw, 100vh * 16/9);
+    border: none; box-shadow: none;
+  }
+  body.touch-mode .canvas-wrap {
+    width: 100vw; height: 100vh;
+  }
+
+  .dpad-area, .action-area {
+    position: absolute;
+    bottom: 14px;
+    pointer-events: auto;
+    display: grid;
+    gap: 8px;
+  }
+  .dpad-area {
+    left: 14px;
+    grid-template-columns: 58px 58px 58px;
+    grid-template-rows: 58px 58px 58px;
+  }
+  .dpad-btn {
+    background: rgba(40,40,60,0.55);
+    border: 2px solid rgba(255,255,255,0.4);
+    color: #fff;
+    font-size: 22px;
+    font-weight: bold;
+    border-radius: 12px;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.05s;
+    padding: 0;
+  }
+  .dpad-btn.up    { grid-column: 2; grid-row: 1; }
+  .dpad-btn.left  { grid-column: 1; grid-row: 2; }
+  .dpad-btn.right { grid-column: 3; grid-row: 2; }
+  .dpad-btn.down  { grid-column: 2; grid-row: 3; }
+  .dpad-btn.pressed { background: rgba(255,180,80,0.7); }
+
+  .action-area {
+    right: 14px;
+    grid-template-columns: 68px 68px;
+    grid-template-rows: 68px 68px;
+  }
+  .action-btn {
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.5);
+    color: #fff;
+    font-weight: bold;
+    font-size: 18px;
+    padding: 0;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: filter 0.05s, transform 0.05s;
+  }
+  .action-btn.guard { grid-column: 1; grid-row: 1; background: rgba(70,140,240,0.55); }
+  .action-btn.punch { grid-column: 2; grid-row: 1; background: rgba(240,80,80,0.55); }
+  .action-btn.kick  { grid-column: 2; grid-row: 2; background: rgba(240,200,70,0.55); color: #222; }
+  .action-btn.pressed { filter: brightness(1.5); transform: scale(0.95); }
+
+  /* 縦持ち時の警告 */
+  .rotate-hint {
+    display: none;
+    position: fixed; inset: 0;
+    background: #000;
+    color: #fff;
+    align-items: center; justify-content: center;
+    flex-direction: column;
+    font-size: 22px; text-align: center;
+    z-index: 100;
+    padding: 20px;
+  }
+  .rotate-hint .icon { font-size: 80px; margin-bottom: 20px; }
+  @media (orientation: portrait) and (pointer: coarse) {
+    body.touch-mode .rotate-hint { display: flex; }
+  }
+</style>
+</head>
+<body>
+<h1>格闘ゲーム（試作版）</h1>
+<div class="canvas-wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+</div>
+<div class="info">
+  <div class="sec"><strong>1P</strong>：移動 <kbd>A</kbd><kbd>D</kbd> ／ しゃがみ <kbd>S</kbd> ／ ジャンプ <kbd>W</kbd> ／ パンチ <kbd>F</kbd> ／ キック <kbd>G</kbd> ／ ガード <kbd>H</kbd></div>
+  <div class="sec"><strong>2P</strong>：移動 <kbd>←</kbd><kbd>→</kbd> ／ しゃがみ <kbd>↓</kbd> ／ ジャンプ <kbd>↑</kbd> ／ パンチ <kbd>J</kbd> ／ キック <kbd>K</kbd> ／ ガード <kbd>L</kbd></div>
+  <div class="sec"><strong>必殺技</strong>（自分から見て）：
+    波動拳系 <kbd>↓</kbd><kbd>↘</kbd><kbd>→</kbd>＋P ／
+    昇龍拳系 <kbd>→</kbd><kbd>↓</kbd><kbd>↘</kbd>＋P ／
+    後ろ系 <kbd>↓</kbd><kbd>↙</kbd><kbd>←</kbd>＋K
+  </div>
+</div>
+
+<div class="touch-overlay" id="touchOverlay">
+  <div class="dpad-area" id="dpadArea">
+    <button class="dpad-btn up"    data-key="up">▲</button>
+    <button class="dpad-btn left"  data-key="left">◀</button>
+    <button class="dpad-btn right" data-key="right">▶</button>
+    <button class="dpad-btn down"  data-key="down">▼</button>
+  </div>
+  <div class="action-area" id="actionArea">
+    <button class="action-btn guard" data-key="guard">守</button>
+    <button class="action-btn punch" data-key="punch">P</button>
+    <button class="action-btn kick"  data-key="kick">K</button>
+  </div>
+</div>
+
+<div class="rotate-hint">
+  <div class="icon">📱</div>
+  <div>画面を横向きにしてください</div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// =========================================================
+// 定数
+// =========================================================
+const W = 960, H = 540;
+const GROUND_Y = 470;
+const GRAVITY = 0.85;
+const HIT_STOP = 4;
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+if (isTouch) document.body.classList.add('touch-mode');
+
+// =========================================================
+// 入力管理
+// =========================================================
+const heldKeys = new Set();
+let pressedKeys = new Set();
+
+function normKey(k) {
+  return k.length === 1 ? k.toLowerCase() : k.toLowerCase();
+}
+
+window.addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  if (e.repeat) return;
+  const k = normKey(e.key);
+  pressedKeys.add(k);
+  heldKeys.add(k);
+});
+window.addEventListener('keyup', e => {
+  heldKeys.delete(normKey(e.key));
+});
+
+const KEYS = {
+  p1: { left:'a', right:'d', up:'w', down:'s', punch:'f', kick:'g', guard:'h' },
+  p2: { left:'arrowleft', right:'arrowright', up:'arrowup', down:'arrowdown', punch:'j', kick:'k', guard:'l' }
+};
+
+// CPU 仮想入力
+const cpuState = {
+  keys: { left:false, right:false, up:false, down:false, punch:false, kick:false, guard:false },
+  pressed: new Set(),
+  attackCooldown: 0,
+  decisionTimer: 0,
+  intent: 'approach'
+};
+
+function held(player, action) {
+  if (player === 'cpu') return cpuState.keys[action] === true;
+  return heldKeys.has(KEYS[player][action]);
+}
+function pressed(player, action) {
+  if (player === 'cpu') return cpuState.pressed.has(action);
+  return pressedKeys.has(KEYS[player][action]);
+}
+
+// =========================================================
+// タッチ操作
+// =========================================================
+const dpadButtons = Array.from(document.querySelectorAll('#dpadArea button'));
+const actionButtons = Array.from(document.querySelectorAll('#actionArea button'));
+const allTouchButtons = [...dpadButtons, ...actionButtons];
+const touchMap = new Map(); // touchId → Set<button>
+
+function getButtonsAtPoint(x, y) {
+  const found = new Set();
+  // D-pad は隣接ボタンとの境界に余裕を持たせる（斜め入力を取りやすく）
+  for (const btn of dpadButtons) {
+    const r = btn.getBoundingClientRect();
+    const pad = 14;
+    if (x >= r.left - pad && x <= r.right + pad &&
+        y >= r.top - pad && y <= r.bottom + pad) {
+      found.add(btn);
+    }
+  }
+  for (const btn of actionButtons) {
+    const r = btn.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      found.add(btn);
+    }
+  }
+  return found;
+}
+
+function syncTouchState() {
+  const currentlyPressed = new Set();
+  for (const btns of touchMap.values()) for (const b of btns) currentlyPressed.add(b);
+
+  for (const btn of allTouchButtons) {
+    const action = btn.dataset.key;
+    const key = KEYS.p1[action];
+    const wasHeld = heldKeys.has(key);
+    const nowPressed = currentlyPressed.has(btn);
+
+    if (nowPressed && !wasHeld) {
+      pressedKeys.add(key);
+      heldKeys.add(key);
+      btn.classList.add('pressed');
+    } else if (!nowPressed && wasHeld) {
+      heldKeys.delete(key);
+      btn.classList.remove('pressed');
+    }
+  }
+}
+
+if (isTouch) {
+  document.addEventListener('touchstart', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      const btns = getButtonsAtPoint(t.clientX, t.clientY);
+      if (btns.size > 0) touchMap.set(t.identifier, btns);
+    }
+    syncTouchState();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (!touchMap.has(t.identifier)) continue;
+      const btns = getButtonsAtPoint(t.clientX, t.clientY);
+      touchMap.set(t.identifier, btns);
+    }
+    syncTouchState();
+  }, { passive: false });
+
+  const touchEnd = e => {
+    for (const t of e.changedTouches) touchMap.delete(t.identifier);
+    syncTouchState();
+  };
+  document.addEventListener('touchend', touchEnd);
+  document.addEventListener('touchcancel', touchEnd);
+
+  // タイトル・結果画面でキャンバスをタップしたら開始/戻る
+  canvas.addEventListener('touchstart', e => {
+    if (gameState === 'title' || gameState === 'result') {
+      pressedKeys.add('f');
+    }
+  });
+}
+
+// =========================================================
+// キャラ定義
+// =========================================================
+const CHARACTERS = [
+  { id:'ryu',     name:'主人公（リュウ風）', hp:100, speed:4.2, jumpPower:15, power:1.0,
+    color:{ body:'#f0f0f0', head:'#ffdfb0', accent:'#c0392b', belt:'#222' },
+    width:52, height:122, desc:'平均型 / 初心者向け' },
+  { id:'chun',    name:'女性キャラ',         hp:80,  speed:5.6, jumpPower:17, power:0.85,
+    color:{ body:'#a3d9ff', head:'#ffdfb0', accent:'#e67e22', belt:'#fff' },
+    width:48, height:114, desc:'高速 / 接近戦特化' },
+  { id:'monster', name:'怪物',               hp:135, speed:2.9, jumpPower:12, power:1.4,
+    color:{ body:'#51cf66', head:'#2b8a3e', accent:'#ffd43b', belt:'#000' },
+    width:74, height:136, desc:'重量級 / 高火力低速' },
+  { id:'samurai', name:'武士',               hp:95,  speed:3.8, jumpPower:14, power:1.15,
+    color:{ body:'#1f1f28', head:'#ffdfb0', accent:'#fa5252', belt:'#c0392b' },
+    width:54, height:124, desc:'中距離 / リーチ長い' }
+];
+
+// =========================================================
+// 技データ
+// =========================================================
+const MOVES = {
+  punch:     { startup:4,  active:3,  recovery:9,  damage:6,  hitstun:14, blockstun:8,  range:{ x:18, y:80, w:50, h:25 } },
+  kick:      { startup:7,  active:4,  recovery:15, damage:9,  hitstun:18, blockstun:12, range:{ x:14, y:45, w:75, h:35 } },
+  hadoken:   { startup:14, active:1,  recovery:30, damage:0,  hitstun:0,  blockstun:0,
+               range:{ x:0,y:0,w:0,h:0 }, projectile:true, projDamage:12, projColor:'#4dabf7' },
+  shoryuken: { startup:5,  active:14, recovery:30, damage:18, hitstun:30, blockstun:14,
+               range:{ x:6, y:130, w:60, h:120 }, upward:true },
+  rapidkick: { startup:6,  active:20, recovery:18, damage:16, hitstun:18, blockstun:12,
+               range:{ x:12, y:55, w:90, h:40 }, dashMove:true, multihit:true },
+  airdash:   { startup:4,  active:14, recovery:14, damage:12, hitstun:16, blockstun:10,
+               range:{ x:8, y:60, w:80, h:50 }, dashMove:true },
+  charge:    { startup:10, active:16, recovery:22, damage:18, hitstun:24, blockstun:14,
+               range:{ x:8, y:80, w:90, h:70 }, dashMove:true },
+  quake:     { startup:14, active:8,  recovery:25, damage:14, hitstun:22, blockstun:14,
+               range:{ x:0, y:25, w:160, h:25 }, lowOnly:true },
+  iai:       { startup:11, active:6,  recovery:24, damage:20, hitstun:28, blockstun:16,
+               range:{ x:14, y:80, w:130, h:40 } },
+  counter:   { startup:8,  active:18, recovery:18, damage:18, hitstun:26, blockstun:14,
+               range:{ x:8, y:90, w:65, h:45 } }
+};
+
+const SPECIALS_BY_CHAR = {
+  ryu: [
+    { move:'hadoken',   command:[2,3,6], button:'P' },
+    { move:'shoryuken', command:[6,2,3], button:'P' }
+  ],
+  chun: [
+    { move:'rapidkick', command:[2,3,6], button:'K' },
+    { move:'airdash',   command:[2,1,4], button:'K' }
+  ],
+  monster: [
+    { move:'charge',    command:[2,3,6], button:'P' },
+    { move:'quake',     command:[2,1,4], button:'K' }
+  ],
+  samurai: [
+    { move:'iai',       command:[2,3,6], button:'P' },
+    { move:'counter',   command:[2,1,4], button:'K' }
+  ]
+};
+
+// =========================================================
+// 飛び道具
+// =========================================================
+class Projectile {
+  constructor(x, y, vx, damage, color, owner) {
+    this.x = x; this.y = y; this.vx = vx;
+    this.damage = damage; this.color = color;
+    this.owner = owner; this.w = 44; this.h = 28;
+    this.alive = true; this.frame = 0;
+  }
+  update() {
+    this.x += this.vx;
+    this.frame++;
+    if (this.x < -60 || this.x > W + 60) this.alive = false;
+  }
+  hitbox() {
+    return { x:this.x-this.w/2, y:this.y-this.h/2, w:this.w, h:this.h,
+             move:{ damage:this.damage, hitstun:22, blockstun:14 } };
+  }
+  draw() {
+    ctx.save();
+    ctx.shadowColor = this.color; ctx.shadowBlur = 18;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.ellipse(this.x, this.y, this.w/2, this.h/2, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(this.x - Math.sign(this.vx)*6, this.y - 4, this.w/4, this.h/5, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// =========================================================
+// Fighter
+// =========================================================
+class Fighter {
+  constructor(charIdx, x, facing, playerKey) {
+    const c = CHARACTERS[charIdx];
+    this.charIdx = charIdx; this.char = c;
+    this.x = x; this.y = GROUND_Y;
+    this.vx = 0; this.vy = 0;
+    this.facing = facing;
+    this.playerKey = playerKey;
+    this.maxHp = c.hp; this.hp = c.hp;
+    this.state = 'idle';
+    this.attackType = null;
+    this.attackFrame = 0;
+    this.multiHitCounter = 0;
+    this.hitstun = 0; this.blockstun = 0; this.hitstop = 0;
+    this.crouching = false; this.airborne = false;
+    this.hitConnected = false;
+    this.inputBuffer = [];
+    this.frameCounter = 0;
+  }
+
+  get width()  { return this.char.width; }
+  get height() { return this.char.height; }
+
+  hurtbox() {
+    const h = (this.crouching && !this.airborne) ? this.height * 0.62 : this.height;
+    return { x: this.x - this.width/2, y: this.y - h, w: this.width, h: h };
+  }
+
+  hitbox() {
+    if (this.state !== 'attack') return null;
+    const m = MOVES[this.attackType];
+    if (!m) return null;
+    if (this.attackFrame < m.startup) return null;
+    if (this.attackFrame >= m.startup + m.active) return null;
+    if (!m.multihit && this.hitConnected) return null;
+    const r = m.range;
+    const offsetX = this.x + this.facing * (this.width/2 + r.x);
+    const left = this.facing === 1 ? offsetX : offsetX - r.w;
+    return { x:left, y:this.y - r.y, w:r.w, h:r.h, move:m };
+  }
+
+  getDirection() {
+    let h = 0, v = 0;
+    if (held(this.playerKey, 'left'))  h -= 1;
+    if (held(this.playerKey, 'right')) h += 1;
+    if (held(this.playerKey, 'down'))  v += 1;
+    if (held(this.playerKey, 'up'))    v -= 1;
+    if (v > 0 && h < 0) return 1;
+    if (v > 0 && h === 0) return 2;
+    if (v > 0 && h > 0) return 3;
+    if (v === 0 && h < 0) return 4;
+    if (v === 0 && h === 0) return 5;
+    if (v === 0 && h > 0) return 6;
+    if (v < 0 && h < 0) return 7;
+    if (v < 0 && h === 0) return 8;
+    if (v < 0 && h > 0) return 9;
+    return 5;
+  }
+
+  pushInputBuffer() {
+    const d = this.getDirection();
+    const last = this.inputBuffer[this.inputBuffer.length - 1];
+    if (!last || last.dir !== d) this.inputBuffer.push({ dir:d, frame:this.frameCounter });
+    this.inputBuffer = this.inputBuffer.filter(b => this.frameCounter - b.frame <= 30);
+  }
+
+  matchCommand(pattern) {
+    const mirror = d => ({ 1:3, 3:1, 4:6, 6:4, 7:9, 9:7, 2:2, 5:5, 8:8 })[d] || d;
+    const target = this.facing === 1 ? pattern : pattern.map(mirror);
+    let idx = target.length - 1;
+    for (let i = this.inputBuffer.length - 1; i >= 0 && idx >= 0; i--) {
+      if (this.frameCounter - this.inputBuffer[i].frame > 25) break;
+      if (this.inputBuffer[i].dir === target[idx]) idx--;
+    }
+    return idx < 0;
+  }
+
+  startAttack(type) {
+    this.state = 'attack';
+    this.attackType = type;
+    this.attackFrame = 0;
+    this.hitConnected = false;
+    this.multiHitCounter = 0;
+    this.vx = 0;
+  }
+
+  update(opponent) {
+    this.frameCounter++;
+    this.pushInputBuffer();
+
+    if (!this.airborne && this.state !== 'attack' && this.state !== 'hitstun' && this.state !== 'ko') {
+      this.facing = (opponent.x > this.x) ? 1 : -1;
+    }
+
+    if (this.hitstop > 0) { this.hitstop--; return; }
+
+    if (this.state === 'ko') {
+      // 倒れて滑る
+      if (this.airborne) {
+        this.vy += GRAVITY;
+        this.y += this.vy;
+        this.x += this.vx;
+        if (this.y >= GROUND_Y) {
+          this.y = GROUND_Y; this.airborne = false; this.vy = 0;
+        }
+      } else {
+        this.vx *= 0.9;
+        this.x += this.vx;
+      }
+      this.clampX();
+      return;
+    }
+
+    if (this.hitstun > 0) {
+      this.hitstun--;
+      this.vx *= 0.9;
+      if (this.airborne) {
+        this.vy += GRAVITY; this.y += this.vy; this.x += this.vx;
+        if (this.y >= GROUND_Y) {
+          this.y = GROUND_Y; this.airborne = false; this.vy = 0;
+          this.hitstun = Math.min(this.hitstun, 10);
+        }
+      } else this.x += this.vx;
+      if (this.hitstun === 0 && !this.airborne) this.state = 'idle';
+      this.clampX();
+      return;
+    }
+
+    if (this.blockstun > 0) {
+      this.blockstun--;
+      this.vx *= 0.85;
+      this.x += this.vx;
+      if (this.blockstun === 0) this.state = held(this.playerKey, 'down') ? 'crouch' : 'idle';
+      this.clampX();
+      return;
+    }
+
+    if (this.state === 'attack') {
+      const m = MOVES[this.attackType];
+      this.attackFrame++;
+      if (m.dashMove && this.attackFrame >= m.startup && this.attackFrame < m.startup + m.active) {
+        this.vx = this.facing * (this.attackType === 'rapidkick' ? 5 : 6);
+      } else this.vx = 0;
+      if (m.upward && this.attackFrame === m.startup) {
+        this.airborne = true; this.vy = -16; this.vx = this.facing * 2.5;
+      }
+      if (m.projectile && this.attackFrame === m.startup) {
+        projectiles.push(new Projectile(
+          this.x + this.facing * 40, this.y - 75,
+          this.facing * 9,
+          Math.round(m.projDamage * this.char.power),
+          m.projColor, this
+        ));
+      }
+      if (m.multihit && this.hitConnected) {
+        this.multiHitCounter++;
+        if (this.multiHitCounter >= 5) { this.hitConnected = false; this.multiHitCounter = 0; }
+      }
+      if (this.airborne) {
+        this.vy += GRAVITY; this.y += this.vy; this.x += this.vx;
+        if (this.y >= GROUND_Y) { this.y = GROUND_Y; this.airborne = false; this.vy = 0; }
+      } else this.x += this.vx;
+      this.clampX();
+      if (this.attackFrame >= m.startup + m.active + m.recovery) {
+        this.state = this.airborne ? 'jump' : 'idle';
+        this.attackType = null; this.attackFrame = 0;
+      }
+      return;
+    }
+
+    const dir = this.getDirection();
+    this.crouching = (dir === 1 || dir === 2 || dir === 3) && !this.airborne;
+
+    const punchHit = pressed(this.playerKey, 'punch');
+    const kickHit  = pressed(this.playerKey, 'kick');
+
+    if (punchHit || kickHit) {
+      const specials = SPECIALS_BY_CHAR[this.char.id] || [];
+      let didSpecial = false;
+      for (const sp of specials) {
+        if ((sp.button === 'P' && punchHit) || (sp.button === 'K' && kickHit)) {
+          if (this.matchCommand(sp.command)) {
+            this.startAttack(sp.move); didSpecial = true; break;
+          }
+        }
+      }
+      if (!didSpecial) {
+        if (punchHit) this.startAttack('punch');
+        else if (kickHit) this.startAttack('kick');
+      }
+      return;
+    }
+
+    if (this.airborne) {
+      this.vy += GRAVITY; this.y += this.vy; this.x += this.vx;
+      if (this.y >= GROUND_Y) {
+        this.y = GROUND_Y; this.airborne = false; this.vy = 0; this.vx = 0;
+        this.state = 'idle';
+      }
+    } else {
+      if (this.crouching) { this.vx = 0; this.state = 'crouch'; }
+      else if (dir === 7 || dir === 8 || dir === 9) {
+        this.airborne = true;
+        this.vy = -this.char.jumpPower;
+        if (dir === 7) this.vx = -this.char.speed * 0.75;
+        else if (dir === 9) this.vx =  this.char.speed * 0.75;
+        else this.vx = 0;
+        this.state = 'jump';
+      } else {
+        const mv = held(this.playerKey,'left') ? -1 : held(this.playerKey,'right') ? 1 : 0;
+        const backward = (mv === -this.facing);
+        this.vx = mv * this.char.speed * (backward ? 0.65 : 1.0);
+        this.x += this.vx;
+        this.state = mv === 0 ? 'idle' : (backward ? 'back' : 'walk');
+      }
+    }
+    this.clampX();
+  }
+
+  clampX() {
+    if (this.x < this.width/2 + 6) this.x = this.width/2 + 6;
+    if (this.x > W - this.width/2 - 6) this.x = W - this.width/2 - 6;
+  }
+
+  takeHit(move, attacker) {
+    if (move.lowOnly && this.airborne) return null;
+    // ガード成立条件：(逆方向入力) または (ガードボタン)
+    const backDir = -this.facing;
+    const backHeld = (backDir === -1 && held(this.playerKey, 'left')) ||
+                     (backDir === 1  && held(this.playerKey, 'right'));
+    const guardBtn = held(this.playerKey, 'guard');
+    const canBlock = (backHeld || guardBtn) && !this.airborne && this.state !== 'attack';
+
+    if (canBlock) {
+      this.state = 'block';
+      this.blockstun = move.blockstun || 12;
+      this.hitstop = HIT_STOP;
+      if (attacker) attacker.hitstop = HIT_STOP;
+      this.vx = -this.facing * 2.5;
+      return 'block';
+    }
+    const dmg = Math.max(1, Math.round((move.damage || 0) * (attacker ? attacker.char.power : 1)));
+    this.hp -= dmg;
+    this.state = 'hitstun';
+    this.hitstun = move.hitstun || 18;
+    this.hitstop = HIT_STOP;
+    if (attacker) attacker.hitstop = HIT_STOP;
+    this.attackType = null; this.attackFrame = 0;
+    if (this.airborne) { this.vy = -5; this.vx = -this.facing * 4; }
+    else this.vx = -this.facing * 3.5;
+    if (this.hp <= 0) {
+      this.hp = 0; this.state = 'ko'; this.hitstun = 9999;
+      this.vx = -this.facing * 5; this.vy = -8; this.airborne = true;
+    }
+    return 'hit';
+  }
+
+  draw() {
+    drawCharacterPose(this.char, this.x, this.y, this.facing, {
+      crouching: this.crouching && !this.airborne,
+      attackType: this.state === 'attack' ? this.attackType : null,
+      attackPhase: this.state === 'attack' ? attackPhase(this) : null,
+      jumping: this.airborne,
+      hitFlash: this.hitstop > 0 || this.blockstun > 6,
+      guarding: this.state === 'block' || (held(this.playerKey,'guard') && !this.airborne && this.state !== 'attack'),
+      ko: this.state === 'ko',
+      state: this.state
+    });
+  }
+}
+
+function attackPhase(f) {
+  const m = MOVES[f.attackType];
+  if (!m) return 'idle';
+  if (f.attackFrame < m.startup) return 'startup';
+  if (f.attackFrame < m.startup + m.active) return 'active';
+  return 'recovery';
+}
+
+// =========================================================
+// CPU AI
+// =========================================================
+function cpuThink(self, opp) {
+  for (const k in cpuState.keys) cpuState.keys[k] = false;
+
+  if (self.state === 'hitstun' || self.state === 'ko' || self.state === 'block' || self.hitstop > 0) return;
+
+  const dist = Math.abs(self.x - opp.x);
+  const facing = (opp.x > self.x) ? 1 : -1;
+  const closer = facing === 1 ? 'right' : 'left';
+  const farther = facing === 1 ? 'left' : 'right';
+
+  // 飛び道具を検知
+  const incomingProj = projectiles.find(pr =>
+    pr.owner !== self &&
+    Math.sign(pr.vx) === -facing &&
+    Math.abs(pr.x - self.x) < 320
+  );
+
+  // 攻撃中は派生制御のみ
+  if (self.state === 'attack') return;
+
+  // 相手の攻撃 or 飛び道具 → ガード or ジャンプ回避
+  if (opp.state === 'attack' && dist < 200) {
+    if (Math.random() < 0.75) {
+      cpuState.keys.guard = true;
+      return;
+    }
+  }
+  if (incomingProj) {
+    if (Math.random() < 0.5 && !self.airborne) {
+      // ジャンプで飛び越える
+      cpuState.keys.up = true;
+      cpuState.keys[closer] = true;
+    } else {
+      cpuState.keys.guard = true;
+    }
+    return;
+  }
+
+  // 接近/離脱
+  if (dist > 130) {
+    cpuState.keys[closer] = true;
+  } else if (dist < 55) {
+    if (Math.random() < 0.15) cpuState.keys[farther] = true;
+  }
+
+  // 近距離なら攻撃を試みる
+  if (dist < 100 && cpuState.attackCooldown <= 0) {
+    const r = Math.random();
+    if (r < 0.04) {
+      cpuState.pressed.add('punch');
+      cpuState.attackCooldown = 25 + Math.floor(Math.random() * 25);
+    } else if (r < 0.07) {
+      cpuState.pressed.add('kick');
+      cpuState.attackCooldown = 30 + Math.floor(Math.random() * 25);
+    }
+  }
+  if (cpuState.attackCooldown > 0) cpuState.attackCooldown--;
+
+  // たまにジャンプ
+  if (!self.airborne && Math.random() < 0.004) {
+    cpuState.keys.up = true;
+    if (Math.random() < 0.5) cpuState.keys[closer] = true;
+  }
+
+  // 距離があるなら稀に飛び道具コマンドを仕込む（リュウのみ実用）
+  if (dist > 180 && self.char.id === 'ryu' && Math.random() < 0.01) {
+    // 簡易：3フレームかけて 2→3→6→P を投入
+    cpuQueueCommand('hadoken');
+  }
+}
+
+let cpuCommandQueue = [];
+function cpuQueueCommand(name) {
+  if (name === 'hadoken') {
+    cpuCommandQueue = [
+      { keys:{down:true}, frames:5 },
+      { keys:{down:true, right:true}, frames:5 },
+      { keys:{right:true}, frames:3 },
+      { keys:{right:true, punch:true}, frames:2, press:'punch' }
+    ];
+  }
+}
+
+function cpuRunQueue(self, opp) {
+  if (cpuCommandQueue.length === 0) return false;
+  const facing = (opp.x > self.x) ? 1 : -1;
+  const step = cpuCommandQueue[0];
+  // 入力を facing に応じて反転
+  for (const k in step.keys) {
+    let mapped = k;
+    if (facing === -1) {
+      if (k === 'right') mapped = 'left';
+      else if (k === 'left') mapped = 'right';
+    }
+    cpuState.keys[mapped] = true;
+  }
+  if (step.press) cpuState.pressed.add(step.press);
+  step.frames--;
+  if (step.frames <= 0) cpuCommandQueue.shift();
+  return true;
+}
+
+// =========================================================
+// キャラ描画
+// =========================================================
+
+// hex色を明暗調整（amt>0=明るく / amt<0=暗く）
+function adjustColor(hex, amt) {
+  let s = String(hex).replace('#', '');
+  if (s.length === 3) s = s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
+  let r = parseInt(s.substr(0,2),16),
+      g = parseInt(s.substr(2,2),16),
+      b = parseInt(s.substr(4,2),16);
+  const target = amt < 0 ? 0 : 255, t = Math.min(1, Math.abs(amt));
+  r = Math.round(r + (target-r)*t);
+  g = Math.round(g + (target-g)*t);
+  b = Math.round(b + (target-b)*t);
+  return 'rgb('+r+','+g+','+b+')';
+}
+
+// 2関節の手足（付け根→関節→先端）を縁取り付きで描く
+function drawLimb(x1,y1,x2,y2,x3,y3,lw,color,outline) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = outline; ctx.lineWidth = lw + 3;
+  ctx.beginPath();
+  ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x3,y3);
+  ctx.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = lw;
+  ctx.beginPath();
+  ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x3,y3);
+  ctx.stroke();
+}
+
+function drawCharacterPoseProcedural(c, cx, cy, facing, opt) {
+  opt = opt || {};
+  const col = c.color;
+  const w = c.width, h = c.height;
+  const headR = w * 0.34;
+  const crouchScale = opt.crouching ? 0.62 : 1;
+  const bodyH = h * 0.5 * crouchScale;
+  const legH  = h * 0.42 * crouchScale;
+  const bodyTopY = cy - bodyH - legH;
+  const headY = bodyTopY - headR + 4;
+  const hipY  = cy - legH;
+
+  // 派生色（陰影・縁取り用）
+  const outline   = adjustColor(col.body, -0.55);
+  const bodyDark  = adjustColor(col.body, -0.26);
+  const bodyLight = adjustColor(col.body,  0.22);
+  const skinDark  = adjustColor(col.head, -0.20);
+  const lineWBase = c.id === 'monster' ? 13 : 10;
+  const atk = opt.attackType, phase = opt.attackPhase;
+  const kickActive = atk === 'kick' && phase === 'active';
+  const footLift = opt.jumping ? legH * 0.32 : 0;
+  const shY = bodyTopY + bodyH * 0.20;
+
+  // 拳を描く小ヘルパ
+  const hand = (x,y) => {
+    ctx.fillStyle = outline;
+    ctx.beginPath(); ctx.arc(x,y,w*0.135+1.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = col.head;
+    ctx.beginPath(); ctx.arc(x,y,w*0.135,0,Math.PI*2); ctx.fill();
+  };
+
+  ctx.save();
+  ctx.lineJoin = 'round';
+
+  // 影（KO時以外）
+  if (!opt.ko) {
+    ctx.fillStyle = 'rgba(0,0,0,0.38)';
+    ctx.beginPath();
+    ctx.ellipse(cx, GROUND_Y + 6, w*0.72, 7, 0, 0, Math.PI*2);
+    ctx.fill();
+  } else {
+    ctx.translate(cx, cy);
+    ctx.rotate(-facing * Math.PI/2 * 0.9);
+    ctx.translate(-cx, -cy);
+  }
+
+  // ===== 後ろ脚 =====
+  drawLimb(
+    cx - facing*w*0.16, hipY,
+    cx - facing*w*(0.06 + (opt.jumping?0.14:0)), hipY + legH*0.50 - footLift*0.5,
+    cx - facing*w*0.30, cy - footLift,
+    lineWBase, bodyDark, outline);
+  ctx.fillStyle = col.belt;
+  ctx.beginPath();
+  ctx.ellipse(cx - facing*w*0.30 + facing*4, cy - footLift, w*0.20, 6, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // ===== 前脚 =====
+  if (kickActive) {
+    drawLimb(
+      cx + facing*w*0.04, hipY,
+      cx + facing*w*0.55, cy - legH*0.62,
+      cx + facing*w*1.10, cy - legH*0.42,
+      lineWBase, col.body, outline);
+    ctx.fillStyle = col.belt;
+    ctx.beginPath();
+    ctx.ellipse(cx + facing*w*1.10, cy - legH*0.42, w*0.20, 7, facing*0.5, 0, Math.PI*2);
+    ctx.fill();
+  } else {
+    drawLimb(
+      cx + facing*w*0.14, hipY,
+      cx + facing*w*(0.24 + (opt.jumping?0.06:0)), hipY + legH*0.50 - footLift*0.5,
+      cx + facing*w*0.22, cy - footLift,
+      lineWBase, col.body, outline);
+    ctx.fillStyle = col.belt;
+    ctx.beginPath();
+    ctx.ellipse(cx + facing*w*0.22 + facing*4, cy - footLift, w*0.20, 6, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // ===== 後ろ腕（胴より先に描いて奥行きを出す） =====
+  if (!opt.guarding) {
+    drawLimb(cx - facing*w*0.02, shY,
+             cx - facing*w*0.30, shY + bodyH*0.34,
+             cx - facing*w*0.30, shY + bodyH*0.60,
+             lineWBase*0.82, bodyDark, outline);
+    hand(cx - facing*w*0.30, shY + bodyH*0.60);
+  }
+
+  // ===== 胴体（台形＋左右グラデで立体感） =====
+  const topW = w*0.94, botW = w*0.76;
+  const tg = ctx.createLinearGradient(cx-w/2, 0, cx+w/2, 0);
+  tg.addColorStop(0, facing===1 ? bodyDark : bodyLight);
+  tg.addColorStop(0.5, col.body);
+  tg.addColorStop(1, facing===1 ? bodyLight : bodyDark);
+  ctx.beginPath();
+  ctx.moveTo(cx - topW/2, bodyTopY);
+  ctx.lineTo(cx + topW/2, bodyTopY);
+  ctx.lineTo(cx + botW/2, bodyTopY + bodyH);
+  ctx.lineTo(cx - botW/2, bodyTopY + bodyH);
+  ctx.closePath();
+  ctx.fillStyle = tg; ctx.fill();
+  ctx.strokeStyle = outline; ctx.lineWidth = 2.5; ctx.stroke();
+  // 襟
+  ctx.fillStyle = col.accent;
+  ctx.beginPath();
+  ctx.moveTo(cx - topW/2, bodyTopY);
+  ctx.lineTo(cx + topW/2, bodyTopY);
+  ctx.lineTo(cx + topW/2 - 7, bodyTopY + bodyH*0.17);
+  ctx.lineTo(cx - topW/2 + 7, bodyTopY + bodyH*0.17);
+  ctx.closePath();
+  ctx.fill();
+  // 道着の合わせ目
+  ctx.strokeStyle = bodyDark; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx, bodyTopY + bodyH*0.17);
+  ctx.lineTo(cx + facing*botW*0.16, bodyTopY + bodyH*0.62);
+  ctx.stroke();
+  // ベルト＋結び目
+  ctx.fillStyle = col.belt;
+  ctx.fillRect(cx - botW/2 - 2, bodyTopY + bodyH*0.66, botW + 4, bodyH*0.16);
+  ctx.beginPath();
+  ctx.arc(cx - facing*botW*0.22, bodyTopY + bodyH*0.74, w*0.10, 0, Math.PI*2);
+  ctx.fill();
+
+  // ===== 頭 =====
+  // 首
+  ctx.strokeStyle = skinDark; ctx.lineWidth = w*0.24; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx, bodyTopY + 2);
+  ctx.lineTo(cx, headY + headR*0.6);
+  ctx.stroke();
+  // 頭本体
+  const hg = ctx.createLinearGradient(cx-headR, 0, cx+headR, 0);
+  hg.addColorStop(0, facing===1 ? skinDark : adjustColor(col.head,0.18));
+  hg.addColorStop(1, facing===1 ? adjustColor(col.head,0.18) : skinDark);
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(cx, headY, headR, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = outline; ctx.lineWidth = 2; ctx.stroke();
+
+  // 髪・装備（キャラ別）
+  if (c.id === 'ryu') {
+    ctx.fillStyle = '#241a12';
+    ctx.beginPath();
+    ctx.arc(cx, headY - headR*0.22, headR*0.98, Math.PI*1.04, Math.PI*1.96);
+    ctx.fill();
+    ctx.fillStyle = col.accent;
+    ctx.fillRect(cx - headR, headY - headR*0.46, headR*2, headR*0.34);
+    ctx.beginPath();
+    ctx.moveTo(cx - facing*headR*0.95, headY - headR*0.40);
+    ctx.lineTo(cx - facing*headR*2.1, headY - headR*0.72);
+    ctx.lineTo(cx - facing*headR*2.0, headY - headR*0.12);
+    ctx.closePath(); ctx.fill();
+  } else if (c.id === 'chun') {
+    ctx.fillStyle = '#3a2a1a';
+    ctx.beginPath();
+    ctx.arc(cx, headY - headR*0.18, headR*0.97, Math.PI*0.96, Math.PI*2.04);
+    ctx.fill();
+    for (const sx of [-1,1]) {
+      ctx.fillStyle = '#3a2a1a';
+      ctx.beginPath();
+      ctx.arc(cx + sx*headR*0.92, headY - headR*0.82, headR*0.5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = col.accent;
+      ctx.beginPath();
+      ctx.arc(cx + sx*headR*0.92, headY - headR*0.82, headR*0.2, 0, Math.PI*2);
+      ctx.fill();
+    }
+  } else if (c.id === 'monster') {
+    ctx.fillStyle = col.accent;
+    ctx.strokeStyle = outline; ctx.lineWidth = 2;
+    for (const sx of [-1,1]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + sx*headR*0.5, headY - headR*0.5);
+      ctx.lineTo(cx + sx*headR*1.3, headY - headR*1.7);
+      ctx.lineTo(cx + sx*headR*0.95, headY - headR*0.3);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
+  } else if (c.id === 'samurai') {
+    ctx.fillStyle = '#15151c';
+    ctx.beginPath();
+    ctx.arc(cx, headY, headR*1.08, Math.PI, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx, headY - headR*0.05, headR*1.3, headR*0.42, 0, 0, Math.PI);
+    ctx.fill();
+    ctx.fillStyle = '#e8c45a';
+    ctx.beginPath();
+    ctx.arc(cx, headY - headR*0.85, headR*0.58, Math.PI*1.15, Math.PI*1.85);
+    ctx.lineTo(cx, headY - headR*0.7);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // 顔
+  if (opt.ko) {
+    ctx.strokeStyle = '#1a1a2a'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    for (const sx of [-1,1]) {
+      const ex = cx + sx*headR*0.34, ey = headY + headR*0.05, r = headR*0.17;
+      ctx.beginPath();
+      ctx.moveTo(ex-r,ey-r); ctx.lineTo(ex+r,ey+r);
+      ctx.moveTo(ex+r,ey-r); ctx.lineTo(ex-r,ey+r);
+      ctx.stroke();
+    }
+  } else {
+    const eyeX = cx + facing*headR*0.30;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(eyeX, headY + headR*0.04, headR*0.22, headR*0.27, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = (c.id==='monster') ? '#ffec3d' : '#1a1a2a';
+    ctx.beginPath();
+    ctx.arc(eyeX + facing*headR*0.07, headY + headR*0.06, headR*0.12, 0, Math.PI*2);
+    ctx.fill();
+    if (c.id==='monster') {
+      ctx.shadowColor = '#ffec3d'; ctx.shadowBlur = 8;
+      ctx.fill(); ctx.shadowBlur = 0;
+    }
+    // 眉（攻撃中は怒り眉）
+    ctx.strokeStyle = (c.id==='ryu') ? '#241a12'
+                    : (c.id==='chun') ? '#3a2a1a' : outline;
+    ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath();
+    if (atk) {
+      ctx.moveTo(cx + facing*headR*0.04, headY - headR*0.26);
+      ctx.lineTo(cx + facing*headR*0.62, headY - headR*0.04);
+    } else {
+      ctx.moveTo(cx + facing*headR*0.06, headY - headR*0.30);
+      ctx.lineTo(cx + facing*headR*0.60, headY - headR*0.32);
+    }
+    ctx.stroke();
+    // 口
+    ctx.strokeStyle = skinDark; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    if (atk && phase==='active') {
+      ctx.arc(cx + facing*headR*0.28, headY + headR*0.52, headR*0.15, 0, Math.PI*2);
+    } else {
+      ctx.moveTo(cx + facing*headR*0.06, headY + headR*0.52);
+      ctx.lineTo(cx + facing*headR*0.44, headY + headR*0.52);
+    }
+    ctx.stroke();
+    // 怪物の牙
+    if (c.id==='monster') {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(cx + facing*headR*0.08, headY + headR*0.44);
+      ctx.lineTo(cx + facing*headR*0.24, headY + headR*0.80);
+      ctx.lineTo(cx + facing*headR*0.34, headY + headR*0.44);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+
+  // ===== 前腕 / ガード =====
+  const armW = lineWBase*0.82;
+  if (opt.guarding) {
+    drawLimb(cx, shY, cx + facing*w*0.34, shY + bodyH*0.30,
+             cx + facing*w*0.46, shY + bodyH*0.06, armW, bodyDark, outline);
+    hand(cx + facing*w*0.46, shY + bodyH*0.06);
+    drawLimb(cx, shY + bodyH*0.18, cx + facing*w*0.30, shY + bodyH*0.12,
+             cx + facing*w*0.48, shY + bodyH*0.46, armW, col.body, outline);
+    hand(cx + facing*w*0.48, shY + bodyH*0.46);
+    ctx.strokeStyle = 'rgba(120,180,255,0.8)'; ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx + facing*w*0.42, shY + bodyH*0.28, w*0.66, -Math.PI*0.55, Math.PI*0.55);
+    ctx.stroke();
+  } else {
+    let elX = cx + facing*w*0.30, elY = shY + bodyH*0.20;
+    let haX = cx + facing*w*0.46, haY = shY + bodyH*0.34;
+    const punching = phase==='active' &&
+      (atk==='punch'||atk==='shoryuken'||atk==='charge'||
+       atk==='iai'||atk==='counter'||atk==='hadoken');
+    if (punching) {
+      elX = cx + facing*w*0.60; elY = shY + bodyH*0.08;
+      haX = cx + facing*w*1.18; haY = shY + bodyH*0.04;
+    }
+    if (atk==='shoryuken' && phase==='active') {
+      elX = cx + facing*w*0.32; elY = shY - bodyH*0.32;
+      haX = cx + facing*w*0.52; haY = shY - bodyH*1.05;
+    }
+    if (atk==='hadoken' && phase==='startup') {
+      elX = cx + facing*w*0.10; elY = shY + bodyH*0.30;
+      haX = cx + facing*w*0.18; haY = shY + bodyH*0.42;
+    } else if (atk==='hadoken' && phase==='active') {
+      elX = cx + facing*w*0.55; elY = shY + bodyH*0.16;
+      haX = cx + facing*w*1.05; haY = shY + bodyH*0.22;
+    }
+    drawLimb(cx, shY, elX, elY, haX, haY, armW, col.body, outline);
+    // 波動拳の溜め／放出光
+    if (atk==='hadoken') {
+      ctx.fillStyle = MOVES.hadoken.projColor;
+      ctx.shadowColor = MOVES.hadoken.projColor;
+      ctx.shadowBlur = 16;
+      ctx.beginPath();
+      ctx.arc(haX, haY, w*0.18, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      hand(haX, haY);
+    }
+  }
+
+  // ===== 武士の刀 =====
+  if (c.id === 'samurai') {
+    if (atk==='iai' && phase==='active') {
+      const x1 = cx + facing*w*0.5, y1 = shY + bodyH*0.12;
+      const x2 = cx + facing*(w*0.5 + 135), y2 = shY - bodyH*0.05;
+      ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 12; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      ctx.strokeStyle = '#eef2f6'; ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    } else {
+      ctx.strokeStyle = '#5a3b22'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - facing*w*0.1, bodyTopY + bodyH*0.78);
+      ctx.lineTo(cx - facing*w*0.85, bodyTopY + bodyH*1.05);
+      ctx.stroke();
+    }
+  }
+
+  // 被弾フラッシュ
+  if (opt.hitFlash && Math.floor(performance.now()/50)%2===0) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(cx, headY + h*0.35, w*0.95, h*0.62, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.restore();
+}
+
+// =========================================================
+// スプライト（Blender生成）描画
+// =========================================================
+// build_sprites.py のカメラ設定と一致させた諸元
+const SPR_W = 512, SPR_H = 640;
+const SPR_FOOT = 576;       // 地面(z=0)に対応するPNGの行
+const SPR_CENTER = 256;     // 中心(x=0)に対応するPNGの列
+const SPRITE_SCALE = 0.34;  // PNGピクセル→ゲーム座標 の倍率
+
+// 各キャラが持つポーズ（build_sprites.py の render と一致）
+const CHAR_POSES = {
+  ryu:     ['idle','walk','crouch','jump','guard','hit','punch','kick','hadoken','shoryuken'],
+  chun:    ['idle','walk','crouch','jump','guard','hit','punch','kick','rapidkick','airdash'],
+  monster: ['idle','walk','crouch','jump','guard','hit','punch','kick','charge','quake'],
+  samurai: ['idle','walk','crouch','jump','guard','hit','punch','kick','iai','counter']
+};
+
+// スプライト先読み
+const SPRITES = {};
+for (const id in CHAR_POSES) {
+  SPRITES[id] = {};
+  for (const pose of CHAR_POSES[id]) {
+    const img = new Image();
+    img.src = 'sprites/' + id + '/' + id + '_' + pose + '.png';
+    SPRITES[id][pose] = img;
+  }
+}
+
+// ゲーム状態 → ポーズ名
+function poseFor(c, opt) {
+  if (opt.attackType) {
+    return (SPRITES[c.id] && SPRITES[c.id][opt.attackType]) ? opt.attackType : 'punch';
+  }
+  if (opt.ko) return 'hit';
+  if (opt.guarding || opt.state === 'block') return 'guard';
+  if (opt.state === 'hitstun') return 'hit';
+  if (opt.jumping || opt.state === 'jump') return 'jump';
+  if (opt.crouching || opt.state === 'crouch') return 'crouch';
+  if (opt.state === 'walk' || opt.state === 'back') return 'walk';
+  return 'idle';
+}
+
+// キャラ描画（スプライト優先・未読込はベクター描画にフォールバック）
+function drawCharacterPose(c, cx, cy, facing, opt) {
+  opt = opt || {};
+  const set = SPRITES[c.id];
+  const img = set ? set[poseFor(c, opt)] : null;
+  if (!img || !img.complete || img.naturalWidth === 0) {
+    drawCharacterPoseProcedural(c, cx, cy, facing, opt);
+    return;
+  }
+  // 影
+  if (!opt.ko) {
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(cx, GROUND_Y + 6, c.width * 0.72, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const dw = SPR_W * SPRITE_SCALE, dh = SPR_H * SPRITE_SCALE;
+  const ax = (SPR_CENTER / SPR_W) * dw;   // 中心・足元アンカー
+  const ay = (SPR_FOOT / SPR_H) * dh;
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (facing === -1) ctx.scale(-1, 1);
+  if (opt.ko) ctx.rotate(-Math.PI / 2 * 0.92);   // 倒れる
+  ctx.drawImage(img, -ax, -ay, dw, dh);
+  if (opt.hitFlash && Math.floor(performance.now() / 50) % 2 === 0) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(-ax, -ay, dw, dh);
+  }
+  ctx.restore();
+}
+
+// =========================================================
+// ゲーム状態
+// =========================================================
+let gameState = 'title';
+let selectStep = 0;
+let selectCursor = [0, 0];
+let players = [null, null];
+let projectiles = [];
+let timer = 60 * 60;
+let resultDelay = 0;
+let winnerText = '';
+let titleBlink = 0;
+
+const MODES = ['vs CPU', 'vs 友達'];
+let modeIndex = 0;
+let isCpuMode = true;
+
+// =========================================================
+// 戦闘開始
+// =========================================================
+function startBattle() {
+  const p1 = new Fighter(selectCursor[0], 280, 1, 'p1');
+  const p2 = new Fighter(selectCursor[1], W - 280, -1, isCpuMode ? 'cpu' : 'p2');
+  players = [p1, p2];
+  projectiles = [];
+  timer = 60 * 60;
+  resultDelay = 0;
+  winnerText = '';
+  cpuCommandQueue = [];
+  cpuState.attackCooldown = 0;
+  gameState = 'battle';
+}
+
+function rectOverlap(a, b) {
+  if (!a || !b) return false;
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function updateBattle() {
+  const [p1, p2] = players;
+  if (isCpuMode) {
+    if (!cpuRunQueue(p2, p1)) cpuThink(p2, p1);
+  }
+  p1.update(p2);
+  p2.update(p1);
+  projectiles.forEach(pr => pr.update());
+  checkHit(p1, p2); checkHit(p2, p1);
+  projectiles = projectiles.filter(pr => {
+    if (!pr.alive) return false;
+    const target = pr.owner === p1 ? p2 : p1;
+    if (rectOverlap(pr.hitbox(), target.hurtbox())) {
+      target.takeHit(pr.hitbox().move, pr.owner);
+      pr.alive = false; return false;
+    }
+    return true;
+  });
+  // 押し合い
+  if (Math.abs(p1.x - p2.x) < (p1.width + p2.width)/2 - 4 && !p1.airborne && !p2.airborne) {
+    const overlap = (p1.width + p2.width)/2 - Math.abs(p1.x - p2.x);
+    const sign = p1.x < p2.x ? -1 : 1;
+    p1.x += sign * overlap/2; p2.x -= sign * overlap/2;
+    p1.clampX(); p2.clampX();
+  }
+  const koSide = p1.hp <= 0 ? 1 : p2.hp <= 0 ? 2 : 0;
+  if (koSide && resultDelay === 0) {
+    resultDelay = 120;
+    winnerText = koSide === 2 ? `1P ${p1.char.name} の勝ち！` :
+                 isCpuMode ? `CPU ${p2.char.name} の勝ち！` : `2P ${p2.char.name} の勝ち！`;
+  }
+  if (resultDelay > 0) {
+    resultDelay--;
+    if (resultDelay === 0) gameState = 'result';
+  } else {
+    timer--;
+    if (timer <= 0) {
+      if (p1.hp > p2.hp) winnerText = `1P ${p1.char.name} の勝ち！（時間切れ）`;
+      else if (p2.hp > p1.hp) winnerText = (isCpuMode ? 'CPU ' : '2P ') + `${p2.char.name} の勝ち！（時間切れ）`;
+      else winnerText = '引き分け';
+      gameState = 'result';
+    }
+  }
+}
+
+function checkHit(attacker, defender) {
+  const hb = attacker.hitbox();
+  if (!hb) return;
+  if (rectOverlap(hb, defender.hurtbox())) {
+    const result = defender.takeHit(hb.move, attacker);
+    if (result === 'hit' || result === 'block') attacker.hitConnected = true;
+  }
+}
+
+// =========================================================
+// 描画：戦闘背景
+// =========================================================
+function drawBattle() {
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#1a2a4c'); grad.addColorStop(0.5,'#a04a3c');
+  grad.addColorStop(0.85,'#d8783c'); grad.addColorStop(1,'#3a1a14');
+  ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = 'rgba(255,220,100,0.9)';
+  ctx.beginPath(); ctx.arc(W*0.7, 280, 70, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(20,10,30,0.6)';
+  ctx.beginPath();
+  ctx.moveTo(0,GROUND_Y);
+  ctx.lineTo(120,320); ctx.lineTo(260,380); ctx.lineTo(430,270);
+  ctx.lineTo(580,350); ctx.lineTo(740,290); ctx.lineTo(W,330);
+  ctx.lineTo(W,GROUND_Y); ctx.fill();
+  ctx.fillStyle = 'rgba(20,10,25,0.75)';
+  for (let i = 0; i < 8; i++) {
+    const bx = i*140 + 20, bh = 40 + (i*17)%60;
+    ctx.fillRect(bx, GROUND_Y-bh, 90, bh);
+  }
+  ctx.fillStyle = '#2a1a14'; ctx.fillRect(0,GROUND_Y,W,H-GROUND_Y);
+  ctx.fillStyle = '#4a2a1a'; ctx.fillRect(0,GROUND_Y,W,5);
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+  for (let gx = 0; gx < W; gx += 40) {
+    ctx.beginPath(); ctx.moveTo(gx, GROUND_Y); ctx.lineTo(gx+40, H); ctx.stroke();
+  }
+  projectiles.forEach(pr => pr.draw());
+  [...players].sort((a,b)=>a.y-b.y).forEach(p => p.draw());
+  drawUI();
+}
+
+function drawUI() {
+  drawHpBar(40, 30, 360, 22, players[0].hp, players[0].maxHp, true, players[0].char.name, '1P');
+  drawHpBar(W-40-360, 30, 360, 22, players[1].hp, players[1].maxHp, false, players[1].char.name, isCpuMode ? 'CPU' : '2P');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 36px sans-serif';
+  ctx.textAlign = 'center'; ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+  const t = Math.max(0, Math.ceil(timer/60));
+  ctx.strokeText(t, W/2, 52); ctx.fillText(t, W/2, 52);
+}
+
+function drawHpBar(x,y,w,h,hp,maxHp,leftToRight,name,label) {
+  const ratio = Math.max(0, hp/maxHp);
+  ctx.fillStyle = '#222'; ctx.fillRect(x,y,w,h);
+  let col = '#ffd43b';
+  if (ratio < 0.5) col = '#ffa94d';
+  if (ratio < 0.25) col = '#fa5252';
+  ctx.fillStyle = col;
+  const fillW = w*ratio;
+  if (leftToRight) ctx.fillRect(x,y,fillW,h);
+  else ctx.fillRect(x+w-fillW,y,fillW,h);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(x,y,w,h);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = leftToRight ? 'left' : 'right';
+  ctx.fillText(`${label}  ${name}`, leftToRight ? x : x+w, y+h+16);
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = leftToRight ? 'right' : 'left';
+  ctx.fillText(`${hp} / ${maxHp}`, leftToRight ? x+w : x, y-4);
+}
+
+// =========================================================
+// タイトル
+// =========================================================
+function drawTitle() {
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#0a0a14'); grad.addColorStop(1,'#3a0a1a');
+  ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = 'rgba(255,80,40,0.15)';
+  ctx.font = 'bold 220px serif'; ctx.textAlign = 'center';
+  ctx.fillText('闘', W/2, 340);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 64px sans-serif';
+  ctx.shadowColor = '#ff6b00'; ctx.shadowBlur = 30;
+  ctx.fillText('格闘ゲーム', W/2, 170);
+  ctx.font = 'bold 18px sans-serif'; ctx.shadowBlur = 10;
+  ctx.fillStyle = '#ffcc66'; ctx.fillText('FIGHTING PROTOTYPE', W/2, 205);
+  ctx.shadowBlur = 0;
+
+  // モード選択
+  ctx.font = 'bold 14px sans-serif';
+  ctx.fillStyle = '#888';
+  ctx.fillText('モード選択', W/2, 270);
+  ctx.font = 'bold 30px sans-serif';
+  MODES.forEach((m, i) => {
+    const y = 310 + i * 50;
+    if (i === modeIndex) {
+      ctx.fillStyle = '#ffd43b';
+      ctx.shadowColor = '#ff6b00'; ctx.shadowBlur = 15;
+      ctx.fillText('▶ ' + m + ' ◀', W/2, y);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#666';
+      ctx.fillText(m, W/2, y);
+    }
+  });
+
+  titleBlink++;
+  if (Math.floor(titleBlink/30) % 2 === 0) {
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillStyle = '#ffd43b';
+    ctx.fillText(isTouch ? 'タップして開始 / ▲▼ でモード切替' : 'F または スペース で開始 / W S でモード切替', W/2, H - 35);
+  }
+}
+
+function updateTitle() {
+  if (pressedKeys.has('arrowup') || pressedKeys.has('w')) modeIndex = Math.max(0, modeIndex - 1);
+  if (pressedKeys.has('arrowdown') || pressedKeys.has('s')) modeIndex = Math.min(MODES.length - 1, modeIndex + 1);
+  if (pressedKeys.has(' ') || pressedKeys.has('enter') || pressedKeys.has('f') || pressedKeys.has('j')) {
+    isCpuMode = (MODES[modeIndex] === 'vs CPU');
+    gameState = 'select';
+    selectStep = 0;
+    selectCursor = [0, 0];
+  }
+}
+
+// =========================================================
+// キャラ選択
+// =========================================================
+function drawSelect() {
+  ctx.fillStyle = '#1a1a26'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('キャラクター選択', W/2, 50);
+  ctx.font = '18px sans-serif';
+  if (selectStep === 0) {
+    ctx.fillStyle = '#4dabf7';
+    ctx.fillText('▼ 1P が選択中 ▼', W/2, 84);
+  } else {
+    ctx.fillStyle = '#f06595';
+    ctx.fillText(isCpuMode ? '▼ CPU を選択中 ▼' : '▼ 2P が選択中 ▼', W/2, 84);
+  }
+
+  const cardW = 200, cardH = 290, gap = 22;
+  const totalW = cardW*4 + gap*3;
+  const startX = (W - totalW)/2;
+  const cardY = 120;
+
+  CHARACTERS.forEach((c,i) => {
+    const cx = startX + i*(cardW+gap);
+    ctx.fillStyle = '#252535'; ctx.fillRect(cx, cardY, cardW, cardH);
+    if (selectStep === 1 && selectCursor[0] === i) {
+      ctx.fillStyle = 'rgba(77,171,247,0.25)';
+      ctx.fillRect(cx, cardY, cardW, cardH);
+    }
+    if (selectCursor[selectStep] === i) {
+      ctx.strokeStyle = selectStep === 0 ? '#4dabf7' : '#f06595';
+      ctx.lineWidth = 4; ctx.strokeRect(cx-2, cardY-2, cardW+4, cardH+4);
+    } else {
+      ctx.strokeStyle = '#444'; ctx.lineWidth = 1; ctx.strokeRect(cx, cardY, cardW, cardH);
+    }
+    drawCharacterPose(c, cx + cardW/2, cardY + cardH - 90, 1, {});
+    if (selectStep === 1 && selectCursor[0] === i) {
+      ctx.fillStyle = '#4dabf7'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('1P', cx+10, cardY+24);
+    }
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(c.name, cx + cardW/2, cardY + 30);
+    ctx.font = '12px sans-serif'; ctx.fillStyle = '#aaa';
+    ctx.fillText(c.desc, cx + cardW/2, cardY + 50);
+    ctx.fillStyle = '#ffd43b'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(`HP   ${c.hp}`,             cx+16, cardY+cardH-50);
+    ctx.fillText(`速度  ${c.speed.toFixed(1)}`, cx+16, cardY+cardH-34);
+    ctx.fillText(`攻撃力 ${c.power.toFixed(2)}`, cx+16, cardY+cardH-18);
+  });
+
+  ctx.fillStyle = '#888'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+  if (selectStep === 0) {
+    ctx.fillText(isTouch ? '◀▶ で選択 → P で決定' : '1P：A/D で選択 → F で決定', W/2, H-30);
+  } else {
+    ctx.fillText('2P：← / → で選択 → J で決定', W/2, H-30);
+  }
+}
+
+function updateSelect() {
+  if (selectStep === 0) {
+    if (pressed('p1','left'))  selectCursor[0] = (selectCursor[0]+3)%4;
+    if (pressed('p1','right')) selectCursor[0] = (selectCursor[0]+1)%4;
+    if (pressed('p1','punch')) {
+      if (isCpuMode) {
+        selectCursor[1] = Math.floor(Math.random()*4);
+        startBattle();
+      } else selectStep = 1;
+    }
+  } else {
+    if (pressed('p2','left'))  selectCursor[1] = (selectCursor[1]+3)%4;
+    if (pressed('p2','right')) selectCursor[1] = (selectCursor[1]+1)%4;
+    if (pressed('p2','punch')) startBattle();
+  }
+}
+
+// =========================================================
+// 結果
+// =========================================================
+function drawResult() {
+  drawBattle();
+  ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 48px sans-serif';
+  ctx.textAlign = 'center'; ctx.shadowColor = '#ff6b00'; ctx.shadowBlur = 25;
+  ctx.fillText(winnerText, W/2, H/2); ctx.shadowBlur = 0;
+  if (Math.floor(performance.now()/500)%2 === 0) {
+    ctx.font = '20px sans-serif'; ctx.fillStyle = '#ffd43b';
+    ctx.fillText(isTouch ? 'タップでタイトルへ' : 'スペースキーでタイトルへ', W/2, H/2+70);
+  }
+}
+
+function updateResult() {
+  if (pressedKeys.has(' ') || pressedKeys.has('f') || pressedKeys.has('j')) {
+    gameState = 'title';
+  }
+}
+
+// =========================================================
+// メインループ
+// =========================================================
+function loop() {
+  if (gameState === 'title')   { drawTitle();   updateTitle(); }
+  else if (gameState === 'select') { drawSelect();  updateSelect(); }
+  else if (gameState === 'battle') { updateBattle(); drawBattle(); }
+  else if (gameState === 'result') { drawResult();  updateResult(); }
+  pressedKeys = new Set();
+  cpuState.pressed.clear();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
