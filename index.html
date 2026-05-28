@@ -427,6 +427,12 @@ const Sound = (() => {
 
   // BGM：16ステップのループ（MIDIノート、0=休符）
   const TRACKS = {
+    title: {                                   // タイトル専用：壮大でゆったり
+      bpm: 92,
+      bass: [45,0,45,0, 48,0,48,0, 41,0,41,0, 43,0,43,0],
+      lead: [76,0,72,0, 81,0,76,0, 72,0,69,0, 74,71,67,0],
+      drums: false
+    },
     menu: {
       bpm: 100,
       bass: [45,0,0,0, 41,0,0,0, 43,0,0,0, 40,0,0,0],
@@ -2602,7 +2608,7 @@ function loop() {
   else if (gameState === 'battle') { updateBattle(); drawBattle(); }
   else if (gameState === 'continue') { drawContinue(); updateContinue(); }
   else if (gameState === 'result') { drawResult();  updateResult(); }
-  Sound.requestBgm(gameState === 'battle' ? 'battle' : 'menu');
+  Sound.requestBgm(gameState === 'title' ? 'title' : gameState === 'battle' ? 'battle' : 'menu');
   pressedKeys = new Set();
   cpuState.pressed.clear();
   requestAnimationFrame(loop);
