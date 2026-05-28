@@ -107,6 +107,11 @@
   .dpad-btn.left  { grid-column: 1; grid-row: 2; }
   .dpad-btn.right { grid-column: 3; grid-row: 2; }
   .dpad-btn.down  { grid-column: 2; grid-row: 3; }
+  .dpad-btn.upleft    { grid-column: 1; grid-row: 1; }
+  .dpad-btn.upright   { grid-column: 3; grid-row: 1; }
+  .dpad-btn.downleft  { grid-column: 1; grid-row: 3; }
+  .dpad-btn.downright { grid-column: 3; grid-row: 3; }
+  .dpad-btn.diag { font-size: 15px; background: rgba(40,40,60,0.40); }
   .dpad-btn.pressed { background: rgba(255,180,80,0.7); }
 
   .action-area {
@@ -128,6 +133,16 @@
   .action-btn.punch { grid-column: 2; grid-row: 1; background: rgba(240,80,80,0.55); }
   .action-btn.kick  { grid-column: 2; grid-row: 2; background: rgba(240,200,70,0.55); color: #222; }
   .action-btn.pressed { filter: brightness(1.5); transform: scale(0.95); }
+
+  /* ミュート切替ボタン（常時表示） */
+  #muteBtn {
+    position: fixed; top: 10px; right: 12px; z-index: 20;
+    width: 42px; height: 42px; border-radius: 50%;
+    background: rgba(30,30,46,0.7); border: 1px solid rgba(255,255,255,0.35);
+    color: #fff; font-size: 20px; cursor: pointer; padding: 0;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  }
+  #muteBtn:active { filter: brightness(1.4); }
 
   /* 縦持ち時の警告 */
   .rotate-hint {
@@ -159,14 +174,24 @@
     昇龍拳系 <kbd>→</kbd><kbd>↓</kbd><kbd>↘</kbd>＋P ／
     後ろ系 <kbd>↓</kbd><kbd>↙</kbd><kbd>←</kbd>＋K
   </div>
+  <div class="sec"><strong>コンボ</strong>：技を当てた直後に次の技でキャンセル ―
+    <kbd>P</kbd> → <kbd>K</kbd> → 必殺技 とつなげて連続ヒット！
+  </div>
+  <div class="sec"><strong>サウンド</strong>：<kbd>M</kbd> キー または右上の 🔊 ボタンでミュート切替（スマホは斜めボタンで必殺技コマンド入力可）</div>
 </div>
+
+<button id="muteBtn" aria-label="サウンド切替">🔊</button>
 
 <div class="touch-overlay" id="touchOverlay">
   <div class="dpad-area" id="dpadArea">
-    <button class="dpad-btn up"    data-key="up">▲</button>
-    <button class="dpad-btn left"  data-key="left">◀</button>
-    <button class="dpad-btn right" data-key="right">▶</button>
-    <button class="dpad-btn down"  data-key="down">▼</button>
+    <button class="dpad-btn diag upleft"    data-key="upleft">↖</button>
+    <button class="dpad-btn up"              data-key="up">▲</button>
+    <button class="dpad-btn diag upright"   data-key="upright">↗</button>
+    <button class="dpad-btn left"            data-key="left">◀</button>
+    <button class="dpad-btn right"           data-key="right">▶</button>
+    <button class="dpad-btn diag downleft"  data-key="downleft">↙</button>
+    <button class="dpad-btn down"            data-key="down">▼</button>
+    <button class="dpad-btn diag downright" data-key="downright">↘</button>
   </div>
   <div class="action-area" id="actionArea">
     <button class="action-btn guard" data-key="guard">守</button>
@@ -255,7 +280,7 @@ function getButtonsAtPoint(x, y) {
   // D-pad は隣接ボタンとの境界に余裕を持たせる（斜め入力を取りやすく）
   for (const btn of dpadButtons) {
     const r = btn.getBoundingClientRect();
-    const pad = 14;
+    const pad = 5;   // 8方向ボタンが密集するので隣接バトンへのにじみを抑える
     if (x >= r.left - pad && x <= r.right + pad &&
         y >= r.top - pad && y <= r.bottom + pad) {
       found.add(btn);
@@ -270,24 +295,35 @@ function getButtonsAtPoint(x, y) {
   return found;
 }
 
+// 1つのボタンが対応するアクション群（斜めボタンは2方向ぶん）
+function actionsForButton(btn) {
+  switch (btn.dataset.key) {
+    case 'upleft':    return ['up', 'left'];
+    case 'upright':   return ['up', 'right'];
+    case 'downleft':  return ['down', 'left'];
+    case 'downright': return ['down', 'right'];
+    default:          return [btn.dataset.key];
+  }
+}
+
 function syncTouchState() {
-  const currentlyPressed = new Set();
-  for (const btns of touchMap.values()) for (const b of btns) currentlyPressed.add(b);
+  const pressedBtns = new Set();
+  for (const btns of touchMap.values()) for (const b of btns) pressedBtns.add(b);
 
-  for (const btn of allTouchButtons) {
-    const action = btn.dataset.key;
+  // 押下中ボタンの見た目
+  for (const btn of allTouchButtons) btn.classList.toggle('pressed', pressedBtns.has(btn));
+
+  // 押下中ボタン群 → 要求アクション集合（斜めは複数方向を立てる）
+  const wantActions = new Set();
+  for (const btn of pressedBtns) for (const a of actionsForButton(btn)) wantActions.add(a);
+
+  // P1 の物理キーと突き合わせて押下/解放を反映
+  for (const action of ['up', 'down', 'left', 'right', 'punch', 'kick', 'guard']) {
     const key = KEYS.p1[action];
-    const wasHeld = heldKeys.has(key);
-    const nowPressed = currentlyPressed.has(btn);
-
-    if (nowPressed && !wasHeld) {
-      pressedKeys.add(key);
-      heldKeys.add(key);
-      btn.classList.add('pressed');
-    } else if (!nowPressed && wasHeld) {
-      heldKeys.delete(key);
-      btn.classList.remove('pressed');
-    }
+    const want = wantActions.has(action);
+    const has = heldKeys.has(key);
+    if (want && !has) { pressedKeys.add(key); heldKeys.add(key); }
+    else if (!want && has) { heldKeys.delete(key); }
   }
 }
 
@@ -324,6 +360,187 @@ if (isTouch) {
       pressedKeys.add('f');
     }
   });
+}
+
+// =========================================================
+// サウンド（WebAudioでBGM・効果音をプロシージャル生成 / 追加ファイル不要）
+// =========================================================
+function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+const Sound = (() => {
+  let ctx = null, master = null, muted = false;
+  let curTrack = null, step = 0, stepTimer = null, stepDur = 0.1;
+
+  function ensure() {
+    if (ctx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = muted ? 0.0001 : 0.45;
+    master.connect(ctx.destination);
+  }
+  function resume() {
+    ensure();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+  }
+
+  // 単発のオシレータ音（任意で周波数スライド）
+  function blip(freq, dur, type, vol, slideTo) {
+    if (!ctx || muted) return;
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t0);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1, slideTo), t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol || 0.3, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t0); osc.stop(t0 + dur + 0.03);
+  }
+  // ノイズ（打撃・破壊音）
+  function noise(dur, vol, cutoff) {
+    if (!ctx || muted) return;
+    const t0 = ctx.currentTime;
+    const n = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = cutoff || 1200;
+    const g = ctx.createGain(); g.gain.value = vol || 0.4;
+    src.connect(lp); lp.connect(g); g.connect(master);
+    src.start(t0);
+  }
+
+  const sfx = {
+    hit:     () => { noise(0.11, 0.5, 1800); blip(240, 0.07, 'square', 0.22, 90); },
+    heavy:   () => { noise(0.2, 0.7, 800);  blip(150, 0.16, 'sawtooth', 0.3, 55); },
+    block:   () => { noise(0.07, 0.32, 5200); blip(950, 0.05, 'square', 0.14); },
+    special: () => { blip(330, 0.16, 'sawtooth', 0.28, 880); blip(550, 0.2, 'square', 0.18, 1320); },
+    jump:    () => blip(440, 0.12, 'square', 0.16, 760),
+    ko:      () => { noise(0.5, 0.85, 700); blip(180, 0.5, 'sawtooth', 0.34, 38); },
+    select:  () => blip(880, 0.05, 'square', 0.18),
+    decide:  () => { blip(660, 0.06, 'square', 0.22); blip(990, 0.12, 'square', 0.2, 1320); }
+  };
+
+  // BGM：16ステップのループ（MIDIノート、0=休符）
+  const TRACKS = {
+    menu: {
+      bpm: 100,
+      bass: [45,0,0,0, 41,0,0,0, 43,0,0,0, 40,0,0,0],
+      lead: [69,0,72,0, 76,0,72,0, 74,0,71,0, 67,0,69,0],
+      drums: false
+    },
+    battle: {
+      bpm: 148,
+      bass: [33,33,40,33, 36,36,43,36, 31,31,38,31, 28,28,35,28],
+      lead: [69,72,76,81, 79,76,72,76, 67,72,76,79, 77,74,72,69],
+      drums: true
+    }
+  };
+
+  function tick() {
+    const tr = TRACKS[curTrack];
+    if (!tr) return;
+    if (!muted) {
+      const b = tr.bass[step % tr.bass.length];
+      if (b) blip(mtof(b), stepDur * 0.95, 'triangle', 0.26);
+      const l = tr.lead[step % tr.lead.length];
+      if (l) blip(mtof(l), stepDur * 1.5, 'square', 0.10);
+      if (tr.drums) {
+        if (step % 4 === 0) noise(0.07, 0.30, 1800);   // キック
+        if (step % 2 === 1) noise(0.03, 0.12, 7000);   // ハイハット
+      }
+    }
+    step = (step + 1) % 16;
+  }
+
+  function playBgm(name) {
+    if (curTrack === name) return;
+    stopBgm();
+    if (!TRACKS[name]) return;
+    curTrack = name; step = 0;
+    stepDur = 60 / TRACKS[name].bpm / 4;     // 16分音符
+    if (ctx) stepTimer = setInterval(tick, stepDur * 1000);
+  }
+  function stopBgm() {
+    if (stepTimer) { clearInterval(stepTimer); stepTimer = null; }
+    curTrack = null;
+  }
+  // ctxがまだ無い状態でplayBgmが呼ばれてもresume後に再生されるよう、毎フレームの要求を保持
+  let wanted = null;
+  function requestBgm(name) {
+    wanted = name;
+    if (ctx && curTrack !== name) playBgm(name);
+  }
+  function toggleMute() {
+    muted = !muted;
+    if (master) master.gain.value = muted ? 0.0001 : 0.45;
+    updateMuteBtn();
+    if (!muted) { resume(); if (wanted) playBgm(wanted); }
+    return muted;
+  }
+  function isMuted() { return muted; }
+
+  function updateMuteBtn() {
+    const b = document.getElementById('muteBtn');
+    if (b) b.textContent = muted ? '🔇' : '🔊';
+  }
+
+  return { resume, sfx, requestBgm, toggleMute, isMuted, updateMuteBtn };
+})();
+
+// 最初の入力で音声を有効化（ブラウザの自動再生制限対策）
+function unlockAudio() { Sound.resume(); }
+window.addEventListener('keydown', unlockAudio, { once: false });
+window.addEventListener('touchstart', unlockAudio, { passive: true });
+window.addEventListener('mousedown', unlockAudio);
+
+// Mキーでミュート切替
+window.addEventListener('keydown', e => { if (normKey(e.key) === 'm') Sound.toggleMute(); });
+
+// ミュートボタン
+const muteBtn = document.getElementById('muteBtn');
+if (muteBtn) {
+  muteBtn.addEventListener('click', e => { e.preventDefault(); Sound.resume(); Sound.toggleMute(); });
+}
+
+// =========================================================
+// 演出（ヒットスパーク・画面シェイク）
+// =========================================================
+let shake = 0;
+const effects = [];
+function addShake(v) { shake = Math.min(18, Math.max(shake, v)); }
+function spawnSpark(x, y, color, count, spread) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2, s = spread * (0.4 + Math.random() * 0.9);
+    effects.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1.2,
+                   life: 1, color, r: 2 + Math.random() * 3 });
+  }
+  effects.push({ ring: true, x, y, life: 1, color: '#ffffff' });
+}
+function updateEffects() {
+  for (const e of effects) {
+    if (e.ring) { e.life -= 0.10; continue; }
+    e.x += e.vx; e.y += e.vy; e.vy += 0.5; e.vx *= 0.92; e.life -= 0.06;
+  }
+  for (let i = effects.length - 1; i >= 0; i--) if (effects[i].life <= 0) effects.splice(i, 1);
+}
+function drawEffects() {
+  for (const e of effects) {
+    if (e.ring) {
+      ctx.globalAlpha = Math.max(0, e.life);
+      ctx.strokeStyle = e.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(e.x, e.y, 6 + (1 - e.life) * 26, 0, Math.PI * 2); ctx.stroke();
+    } else {
+      ctx.globalAlpha = Math.max(0, e.life);
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r * e.life + 0.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
 }
 
 // =========================================================
@@ -433,6 +650,16 @@ const SPECIALS_BY_CHAR = {
 };
 
 // =========================================================
+// コンボ連携（チェーンキャンセル）
+//   ヒット/ガードを当てた通常技は、硬直中に次の技へキャンセルできる。
+//   パンチ → キック → 必殺技 の連鎖が基本。必殺技からはキャンセル不可。
+// =========================================================
+const CHAIN_FROM = {
+  punch: { normals: ['kick'], special: true },   // P → K もしくは P → 必殺
+  kick:  { normals: [],       special: true }    // K → 必殺のみ
+};
+
+// =========================================================
 // 飛び道具
 // =========================================================
 class Projectile {
@@ -487,6 +714,10 @@ class Fighter {
     this.hitConnected = false;
     this.inputBuffer = [];
     this.frameCounter = 0;
+    this.recvCombo = 0;     // この相手にいま何ヒット連続で当てられているか（受け側）
+    this.comboHits = 0;     // 自分が決めている表示中コンボ数（攻め側）
+    this.comboTimer = 0;    // コンボ表示の残フレーム
+    this.comboPop = 0;      // コンボ数更新時のポップ演出
   }
 
   get width()  { return this.char.width; }
@@ -553,6 +784,27 @@ class Fighter {
     this.hitConnected = false;
     this.multiHitCounter = 0;
     this.vx = 0;
+    if (type !== 'punch' && type !== 'kick') Sound.sfx.special();   // 必殺技の発声
+  }
+
+  // 押されたボタン＋コマンド履歴から、出すべき技を決める
+  chooseAttack(punchHit, kickHit) {
+    const specials = SPECIALS_BY_CHAR[this.char.id] || [];
+    for (const sp of specials) {
+      if ((sp.button === 'P' && punchHit) || (sp.button === 'K' && kickHit)) {
+        if (this.matchCommand(sp.command)) return { move: sp.move, special: true };
+      }
+    }
+    if (punchHit) return { move: 'punch', special: false };
+    if (kickHit)  return { move: 'kick',  special: false };
+    return null;
+  }
+
+  // いまの技から choice の技へキャンセルできるか
+  isChainAllowed(fromType, choice) {
+    const rule = CHAIN_FROM[fromType];
+    if (!rule) return false;                       // 必殺技などからは連携不可
+    return choice.special ? rule.special : rule.normals.includes(choice.move);
   }
 
   update(opponent) {
@@ -592,7 +844,7 @@ class Fighter {
           this.hitstun = Math.min(this.hitstun, 10);
         }
       } else this.x += this.vx;
-      if (this.hitstun === 0 && !this.airborne) this.state = 'idle';
+      if (this.hitstun === 0 && !this.airborne) { this.state = 'idle'; this.recvCombo = 0; }
       this.clampX();
       return;
     }
@@ -608,6 +860,18 @@ class Fighter {
 
     if (this.state === 'attack') {
       const m = MOVES[this.attackType];
+      // --- チェーンキャンセル：技が当たった後の硬直中なら次の技へ ---
+      if (this.hitConnected && this.attackFrame >= m.startup) {
+        const ph = pressed(this.playerKey, 'punch');
+        const kh = pressed(this.playerKey, 'kick');
+        if (ph || kh) {
+          const choice = this.chooseAttack(ph, kh);
+          if (choice && this.isChainAllowed(this.attackType, choice)) {
+            this.startAttack(choice.move);
+            return;
+          }
+        }
+      }
       this.attackFrame++;
       if (m.dashMove && this.attackFrame >= m.startup && this.attackFrame < m.startup + m.active) {
         this.vx = this.facing * (this.attackType === 'rapidkick' ? 5 : 6);
@@ -646,19 +910,8 @@ class Fighter {
     const kickHit  = pressed(this.playerKey, 'kick');
 
     if (punchHit || kickHit) {
-      const specials = SPECIALS_BY_CHAR[this.char.id] || [];
-      let didSpecial = false;
-      for (const sp of specials) {
-        if ((sp.button === 'P' && punchHit) || (sp.button === 'K' && kickHit)) {
-          if (this.matchCommand(sp.command)) {
-            this.startAttack(sp.move); didSpecial = true; break;
-          }
-        }
-      }
-      if (!didSpecial) {
-        if (punchHit) this.startAttack('punch');
-        else if (kickHit) this.startAttack('kick');
-      }
+      const choice = this.chooseAttack(punchHit, kickHit);
+      if (choice) this.startAttack(choice.move);
       return;
     }
 
@@ -677,6 +930,7 @@ class Fighter {
         else if (dir === 9) this.vx =  this.char.speed * 0.75;
         else this.vx = 0;
         this.state = 'jump';
+        if (this.playerKey !== 'cpu') Sound.sfx.jump();
       } else {
         const mv = held(this.playerKey,'left') ? -1 : held(this.playerKey,'right') ? 1 : 0;
         const backward = (mv === -this.facing);
@@ -708,9 +962,14 @@ class Fighter {
       this.hitstop = HIT_STOP;
       if (attacker) attacker.hitstop = HIT_STOP;
       this.vx = -this.facing * 2.5;
+      this.recvCombo = 0;               // ガードでコンボは途切れる
       return 'block';
     }
-    const dmg = Math.max(1, Math.round((move.damage || 0) * (attacker ? attacker.char.power : 1)));
+    // コンボ継続判定とダメージ補正（連続ヒットほど減衰）
+    const comboing = this.hitstun > 0 || this.state === 'hitstun';
+    this.recvCombo = comboing ? this.recvCombo + 1 : 1;
+    const prorate = Math.max(0.35, 1 - 0.12 * (this.recvCombo - 1));
+    const dmg = Math.max(1, Math.round((move.damage || 0) * (attacker ? attacker.char.power : 1) * prorate));
     this.hp -= dmg;
     this.state = 'hitstun';
     this.hitstun = move.hitstun || 18;
@@ -1392,7 +1651,13 @@ function updateBattle() {
     if (!pr.alive) return false;
     const target = pr.owner === p1 ? p2 : p1;
     if (rectOverlap(pr.hitbox(), target.hurtbox())) {
-      target.takeHit(pr.hitbox().move, pr.owner);
+      const res = target.takeHit(pr.hitbox().move, pr.owner);
+      const cx = pr.x, cy = target.y - target.height * 0.5;
+      if (res === 'block') { spawnSpark(cx, cy, '#74c0fc', 7, 3); Sound.sfx.block(); addShake(2); }
+      else if (res === 'hit') {
+        spawnSpark(cx, cy, '#4dabf7', 14, 5); Sound.sfx.heavy(); addShake(5);
+        pr.owner.comboHits = target.recvCombo; pr.owner.comboTimer = 80; pr.owner.comboPop = 9;
+      }
       pr.alive = false; return false;
     }
     return true;
@@ -1404,11 +1669,23 @@ function updateBattle() {
     p1.x += sign * overlap/2; p2.x -= sign * overlap/2;
     p1.clampX(); p2.clampX();
   }
+  // 演出更新
+  updateEffects();
+  if (shake > 0) shake = Math.max(0, shake - 0.8);
+  for (const p of players) {
+    if (p.comboTimer > 0) p.comboTimer--;
+    if (p.comboPop > 0) p.comboPop--;
+  }
+
   const koSide = p1.hp <= 0 ? 1 : p2.hp <= 0 ? 2 : 0;
   if (koSide && resultDelay === 0) {
     resultDelay = 120;
     winnerText = koSide === 2 ? `1P ${p1.char.name} の勝ち！` :
                  isCpuMode ? `CPU ${p2.char.name} の勝ち！` : `2P ${p2.char.name} の勝ち！`;
+    Sound.sfx.ko();
+    addShake(16);
+    const loser = koSide === 1 ? p1 : p2;
+    spawnSpark(loser.x, loser.y - loser.height * 0.5, '#ffd43b', 24, 8);
   }
   if (resultDelay > 0) {
     resultDelay--;
@@ -1425,6 +1702,22 @@ function checkHit(attacker, defender) {
   if (rectOverlap(hb, defender.hurtbox())) {
     const result = defender.takeHit(hb.move, attacker);
     if (result === 'hit' || result === 'block') attacker.hitConnected = true;
+    const cx = (attacker.x + defender.x) / 2;
+    if (result === 'hit') {
+      const heavy = (hb.move.damage || 0) >= 14;
+      const cy = defender.y - defender.height * 0.55;
+      spawnSpark(cx, cy, heavy ? '#ff8f3f' : '#ffe066', heavy ? 16 : 9, heavy ? 6 : 4);
+      addShake(heavy ? 7 : 3.5);
+      heavy ? Sound.sfx.heavy() : Sound.sfx.hit();
+      // コンボ表示は攻め側に記録
+      attacker.comboHits = defender.recvCombo;
+      attacker.comboTimer = 80;
+      attacker.comboPop = 9;
+    } else if (result === 'block') {
+      spawnSpark(cx, defender.y - defender.height * 0.5, '#74c0fc', 6, 3);
+      addShake(2);
+      Sound.sfx.block();
+    }
   }
 }
 
@@ -1988,16 +2281,35 @@ function drawStageSelect() {
 
 function updateStageSelect() {
   const n = STAGES.length;
-  if (pressed('p1','left'))  stageCursor = (stageCursor + n - 1) % n;
-  if (pressed('p1','right')) stageCursor = (stageCursor + 1) % n;
-  if (pressed('p1','punch')) { selectedStage = stageCursor; startBattle(); }
+  if (pressed('p1','left'))  { stageCursor = (stageCursor + n - 1) % n; Sound.sfx.select(); }
+  if (pressed('p1','right')) { stageCursor = (stageCursor + 1) % n; Sound.sfx.select(); }
+  if (pressed('p1','punch')) { Sound.sfx.decide(); selectedStage = stageCursor; startBattle(); }
 }
 
 function drawBattle() {
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random()*2-1)*shake, (Math.random()*2-1)*shake);
   STAGES[selectedStage].draw();
   projectiles.forEach(pr => pr.draw());
   [...players].sort((a,b)=>a.y-b.y).forEach(p => p.draw());
+  drawEffects();
+  ctx.restore();
   drawUI();
+  if (resultDelay > 0) drawKoBanner();
+}
+
+function drawKoBanner() {
+  ctx.save();
+  ctx.textAlign = 'center';
+  const pulse = 1 + 0.07 * Math.sin(performance.now() / 80);
+  ctx.translate(W / 2, H / 2 - 10);
+  ctx.scale(pulse, pulse);
+  ctx.font = 'bold 118px sans-serif';
+  ctx.lineWidth = 9; ctx.strokeStyle = '#000';
+  ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 30;
+  ctx.strokeText('K.O.', 0, 0);
+  ctx.fillStyle = '#fa5252'; ctx.fillText('K.O.', 0, 0);
+  ctx.restore();
 }
 
 function drawUI() {
@@ -2011,6 +2323,24 @@ function drawUI() {
   ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = '#ffd43b';
   const isBoss = arcadeRound >= arcadeQueue.length - 1;
   ctx.fillText(isBoss ? 'BOSS戦' : `${arcadeRound + 1} / ${arcadeQueue.length} 戦`, W/2, 74);
+
+  // コンボカウンタ（攻め側に表示）
+  players.forEach((p, i) => {
+    if (p.comboTimer > 0 && p.comboHits >= 2) {
+      const x = i === 0 ? 156 : W - 156, y = 150;
+      const pop = 1 + (p.comboPop || 0) * 0.05;
+      ctx.save();
+      ctx.translate(x, y); ctx.scale(pop, pop); ctx.textAlign = 'center';
+      ctx.lineWidth = 5; ctx.strokeStyle = '#000';
+      ctx.font = 'bold 44px sans-serif';
+      ctx.strokeText(p.comboHits, 0, 0);
+      ctx.fillStyle = '#ffd43b'; ctx.fillText(p.comboHits, 0, 0);
+      ctx.font = 'bold 18px sans-serif';
+      ctx.strokeText('HITS', 0, 24);
+      ctx.fillStyle = '#fff'; ctx.fillText('HITS', 0, 24);
+      ctx.restore();
+    }
+  });
 }
 
 function drawHpBar(x,y,w,h,hp,maxHp,leftToRight,name,label) {
@@ -2079,6 +2409,7 @@ function updateTitle() {
   if (pressedKeys.has('arrowup') || pressedKeys.has('w')) modeIndex = Math.max(0, modeIndex - 1);
   if (pressedKeys.has('arrowdown') || pressedKeys.has('s')) modeIndex = Math.min(MODES.length - 1, modeIndex + 1);
   if (pressedKeys.has(' ') || pressedKeys.has('enter') || pressedKeys.has('f') || pressedKeys.has('j')) {
+    Sound.sfx.decide();
     isCpuMode = true;
     gameState = 'select';
     selectStep = 0;
@@ -2152,9 +2483,9 @@ function drawSelect() {
 
 function updateSelect() {
   const n = SELECTABLE;
-  if (pressed('p1','left'))  selectCursor[0] = (selectCursor[0]+n-1)%n;
-  if (pressed('p1','right')) selectCursor[0] = (selectCursor[0]+1)%n;
-  if (pressed('p1','punch')) startArcade();
+  if (pressed('p1','left'))  { selectCursor[0] = (selectCursor[0]+n-1)%n; Sound.sfx.select(); }
+  if (pressed('p1','right')) { selectCursor[0] = (selectCursor[0]+1)%n; Sound.sfx.select(); }
+  if (pressed('p1','punch')) { Sound.sfx.decide(); startArcade(); }
 }
 
 // =========================================================
@@ -2271,6 +2602,7 @@ function loop() {
   else if (gameState === 'battle') { updateBattle(); drawBattle(); }
   else if (gameState === 'continue') { drawContinue(); updateContinue(); }
   else if (gameState === 'result') { drawResult();  updateResult(); }
+  Sound.requestBgm(gameState === 'battle' ? 'battle' : 'menu');
   pressedKeys = new Set();
   cpuState.pressed.clear();
   requestAnimationFrame(loop);
